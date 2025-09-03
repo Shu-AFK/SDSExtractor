@@ -40,4 +40,8 @@ def convert_data_to_list(data: dict) -> list:
         ", ".join(data["cas_numbers"]),
         ", ".join(data["h_statements"]),
         ", ".join(data["pictograms"]),
+        "",
+        "",
+        "",
+        data["sds_date"],
     ]

@@ -20,6 +20,7 @@ class RowWidget:
             "h_statements": [],
             "cas_numbers": [],
             "pictograms": [],
+            "sds_date": "",
         }
 
         self.frame = tk.Frame(parent, padx=6, pady=4, borderwidth=1, relief="groove")
@@ -57,6 +58,7 @@ class RowWidget:
             "h_statements": set(),
             "cas_numbers": set(),
             "pictograms": set(),
+            "sds_date": None
         }
 
         for pdf_path in file_paths:
@@ -67,6 +69,9 @@ class RowWidget:
                     agg["handelsname"] = parsed["handelsname"]
                 if not agg["manufacturer"] and parsed.get("manufacturer"):
                     agg["manufacturer"] = parsed["manufacturer"]
+                if not agg["sds_date"] and parsed.get("sds_date"):
+                    agg["sds_date"] = parsed["sds_date"]
+
                 for key in ("h_statements", "cas_numbers", "pictograms"):
                     for v in parsed.get(key, []):
                         agg[key].add(v)
@@ -79,6 +84,7 @@ class RowWidget:
         self.data["h_statements"] = sorted(agg["h_statements"])
         self.data["cas_numbers"] = sorted(agg["cas_numbers"])
         self.data["pictograms"] = sorted(agg["pictograms"])
+        self.data["sds_date"] = agg["sds_date"] or ""
 
         # Set Handelsname and enable editing
         self.handelsname_var.set(self.data["handelsname"])
@@ -101,7 +107,7 @@ class RowWidget:
             "",  # Lagerort
             "",  # Menge im Lager
             "",  # Besonderheiten
-            "",  # Stand
+            self.data["sds_date"] or "",
         ]
 
 

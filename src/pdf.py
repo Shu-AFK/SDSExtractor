@@ -10,9 +10,9 @@ def extract_text_chain(pdf_path: str) -> str:
     raw_text = "\n".join(text_parts)
 
     # Clean text
-    text = re.sub(r"-\n", "", raw_text)   # fix split words
-    text = re.sub(r"\n+", "\n", text)     # collapse newlines
-    text = re.sub(r"[ \t]+", " ", text)   # normalize spaces
+    text = re.sub(r"-\n", "", raw_text)  # fix split words
+    text = re.sub(r"\n+", "\n", text)    # collapse newlines
+    text = re.sub(r"[ \t]+", " ", text)  # normalize spaces
     return text.strip()
 
 
@@ -35,19 +35,30 @@ def parse_sds(text: str) -> dict:
         "manufacturer": None,
         "h_statements": [],
         "cas_numbers": [],
-        "pictograms": []
+        "pictograms": [],
+        "sds_date": None
     }
 
+    # Datum aus dem gesamten Dokument suchen (vor Abschnitt 1)
+    date_match = re.search(
+        r"(?:Überarbeitet am|Druckdatum|Bearbeitungsdatum|Erstelldatum|Stand|Revisionsdatum)\s*:?\s*([\d]{1,2}[.\-/][\d]{1,2}[.\-/][\d]{4})",
+        text,
+        flags=re.I
+    )
+    if date_match:
+        data["sds_date"] = date_match.group(1).strip()
+
+    # Abschnitte extrahieren
     sections = split_sections(text)
 
-    # Abschnitt 1.1 – Handelsname
+    # Abschnitt 1
     if "1" in sections:
+        # Abschnitt 1.1 – Handelsname
         handels_match = re.search(r"Handelsname:\s*(.*)", sections["1"])
         if handels_match:
             data["handelsname"] = handels_match.group(1).strip()
 
-    # Abschnitt 1.3 – Hersteller
-    if "1" in sections:
+        # Abschnitt 1.3 – Hersteller
         manuf_match = re.search(r"Hersteller/Lieferant:\s*([^\n\r]+)", sections["1"], flags=re.I)
         if manuf_match:
             data["manufacturer"] = manuf_match.group(1).strip()
@@ -69,4 +80,5 @@ def parse_sds(text: str) -> dict:
         cas_matches = re.findall(r"\d{2,7}-\d{2}-\d", sections["3"])
         data["cas_numbers"] = sorted(set(cas_matches))
 
+    print(data)
     return data
