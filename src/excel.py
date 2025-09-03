@@ -19,7 +19,7 @@ def open_and_write_excel(filepath: str, row_data: list, sheet_name="Gefahrstoffk
         wb = Workbook()
         ws = wb.active
         ws.title = sheet_name
-        ws.append(["Produktname / Handelsname", "Hersteller", "CAS-Nr.", "Gefahren (H-Sätze)", "Piktogramme", "Lagerort", "Menge im Lager", "Besonderheiten", "Stand"])
+        ws.append(["Produktname / Handelsname", "Hersteller", "UN-Nr.", "Gefahren (H-Sätze)", "Piktogramme", "Lagerort", "Menge im Lager", "Besonderheiten", "Stand"])
 
 
     ws.append(row_data)
@@ -37,7 +37,7 @@ def convert_data_to_list(data: dict) -> list:
     return [
         data["handelsname"],
         data["manufacturer"],
-        ", ".join(data["cas_numbers"]),
+        data["un_number"],
         ", ".join(data["h_statements"]),
         ", ".join(data["pictograms"]),
         "",

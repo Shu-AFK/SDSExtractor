@@ -34,7 +34,7 @@ def parse_sds(text: str) -> dict:
         "handelsname": None,
         "manufacturer": None,
         "h_statements": [],
-        "cas_numbers": [],
+        "un_number": None,
         "pictograms": [],
         "sds_date": None
     }
@@ -55,30 +55,24 @@ def parse_sds(text: str) -> dict:
     if "1" in sections:
         # Abschnitt 1.1 – Handelsname
         handels_match = re.search(r"Handelsname:\s*(.*)", sections["1"])
-        if handels_match:
-            data["handelsname"] = handels_match.group(1).strip()
+        data["handelsname"] = handels_match.group(1).strip() if handels_match else None
 
         # Abschnitt 1.3 – Hersteller
         manuf_match = re.search(r"Hersteller/Lieferant:\s*([^\n\r]+)", sections["1"], flags=re.I)
-        if manuf_match:
-            data["manufacturer"] = manuf_match.group(1).strip()
+        data["manufacturer"] = manuf_match.group(1).strip() if manuf_match else None
 
     # Abschnitt 2.1/2.2 – H-Sätze + Piktogramme
     if "2" in sections:
-        h_matches = re.findall(r"(H\d{3}[^.\n]*)", sections["2"])
-        cleaned = []
-        for h in h_matches:
-            # insert space after Hxxx if missing
-            cleaned.append(re.sub(r"^(H\d{3})(?=\S)", r"\1 ", h.strip()))
-        data["h_statements"] = sorted(set(cleaned))
+        h_matches = re.findall(r"H\d{3}", sections["2"])
+        data["h_statements"] = sorted(set(h_matches))
 
         ghs_matches = re.findall(r"GHS\d{2}", sections["2"])
         data["pictograms"] = sorted(set(ghs_matches))
 
-    # Abschnitt 3 – CAS-Nummern
-    if "3" in sections:
-        cas_matches = re.findall(r"\d{2,7}-\d{2}-\d", sections["3"])
-        data["cas_numbers"] = sorted(set(cas_matches))
+    # Abschnitt 14 – UN-Nummern
+    if "9" in sections:
+        un_match = re.search(r"UN\d{1,4}", sections["9"], flags=re.I)
+        data["un_number"] = un_match.group(1).strip() if un_match else None
 
     print(data)
     return data

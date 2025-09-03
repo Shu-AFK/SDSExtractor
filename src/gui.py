@@ -20,7 +20,7 @@ class RowWidget:
             "handelsname": "",
             "manufacturer": "",
             "h_statements": [],
-            "cas_numbers": [],
+            "un_number": "",
             "pictograms": [],
             "sds_date": "",
         }
@@ -72,7 +72,7 @@ class RowWidget:
                 "handelsname": parsed.get("handelsname") or "",
                 "manufacturer": parsed.get("manufacturer") or "",
                 "h_statements": sorted(parsed.get("h_statements", [])),
-                "cas_numbers": sorted(parsed.get("cas_numbers", [])),
+                "un_number": sorted(parsed.get("un_number", [])),
                 "pictograms": sorted(parsed.get("pictograms", [])),
                 "sds_date": parsed.get("sds_date") or "",
             }
@@ -99,7 +99,7 @@ class RowWidget:
         return [
             self.data["handelsname"],
             self.data["manufacturer"] or "",
-            ", ".join(self.data["cas_numbers"]) or "",
+            ", ".join(self.data["un_number"]) or "",
             "; ".join(self.data["h_statements"]) or "",
             ", ".join(self.data["pictograms"]) or "",
             "",  # Lagerort
