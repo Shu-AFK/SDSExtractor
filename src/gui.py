@@ -1,9 +1,13 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
+import base64
+from io import BytesIO
+from PIL import Image, ImageTk
 
 from src.pdf import extract_text_chain, parse_sds
 from src.excel import open_and_write_excel
+import src.image
 
 
 class RowWidget:
@@ -110,6 +114,12 @@ class App(tk.Tk):
         super().__init__()
         self.title("SDS → Excel")
         self.geometry("800x420")
+
+        icon_data = base64.b64decode(src.image.icon_base64)
+        img = Image.open(BytesIO(icon_data))
+        icon = ImageTk.PhotoImage(img)
+
+        self.iconphoto(False, icon)
 
         top = tk.Frame(self, padx=10, pady=10)
         top.pack(fill="x")
