@@ -1,0 +1,72 @@
+import re
+import pdfplumber
+
+def extract_text_chain(pdf_path: str) -> str:
+    """Extract and normalize text from SDS PDF."""
+    text_parts = []
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            text_parts.append(page.extract_text(layout=True) or "")
+    raw_text = "\n".join(text_parts)
+
+    # Clean text
+    text = re.sub(r"-\n", "", raw_text)   # fix split words
+    text = re.sub(r"\n+", "\n", text)     # collapse newlines
+    text = re.sub(r"[ \t]+", " ", text)   # normalize spaces
+    return text.strip()
+
+
+def split_sections(text: str) -> dict:
+    """Split SDS into sections by 'ABSCHNITT x:' headers."""
+    sections = {}
+    matches = list(re.finditer(r"\*?\s*ABSCHNITT\s+(\d+):\s*(.*)", text, flags=re.I))
+    for i, match in enumerate(matches):
+        sec_num = match.group(1)
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[sec_num] = text[start:end].strip()
+    return sections
+
+
+def parse_sds(text: str) -> dict:
+    """Extract key SDS info by EU norm fields."""
+    data = {
+        "handelsname": None,
+        "manufacturer": None,
+        "h_statements": [],
+        "cas_numbers": [],
+        "pictograms": []
+    }
+
+    sections = split_sections(text)
+
+    # Abschnitt 1.1 – Handelsname
+    if "1" in sections:
+        handels_match = re.search(r"Handelsname:\s*(.*)", sections["1"])
+        if handels_match:
+            data["handelsname"] = handels_match.group(1).strip()
+
+    # Abschnitt 1.3 – Hersteller
+    if "1" in sections:
+        manuf_match = re.search(r"Hersteller/Lieferant:\s*([^\n\r]+)", sections["1"], flags=re.I)
+        if manuf_match:
+            data["manufacturer"] = manuf_match.group(1).strip()
+
+    # Abschnitt 2.1/2.2 – H-Sätze + Piktogramme
+    if "2" in sections:
+        h_matches = re.findall(r"(H\d{3}[^.\n]*)", sections["2"])
+        cleaned = []
+        for h in h_matches:
+            # insert space after Hxxx if missing
+            cleaned.append(re.sub(r"^(H\d{3})(?=\S)", r"\1 ", h.strip()))
+        data["h_statements"] = sorted(set(cleaned))
+
+        ghs_matches = re.findall(r"GHS\d{2}", sections["2"])
+        data["pictograms"] = sorted(set(ghs_matches))
+
+    # Abschnitt 3 – CAS-Nummern
+    if "3" in sections:
+        cas_matches = re.findall(r"\d{2,7}-\d{2}-\d", sections["3"])
+        data["cas_numbers"] = sorted(set(cas_matches))
+
+    return data
