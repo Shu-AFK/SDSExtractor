@@ -53,8 +53,8 @@ def parse_sds(text: str) -> dict:
 
     # Abschnitt 1
     if "1" in sections:
-        # Abschnitt 1.1 – Handelsname
-        handels_match = re.search(r"Handelsname:\s*(.*)", sections["1"])
+        # Abschnitt 1.1 – Handelsname (accepts "Handelsname" or "Artikelname")
+        handels_match = re.search(r"(?:Handelsname|Artikelname):\s*(.*)", sections["1"], flags=re.I)
         data["handelsname"] = handels_match.group(1).strip() if handels_match else None
 
         # Abschnitt 1.3 – Hersteller
@@ -63,16 +63,16 @@ def parse_sds(text: str) -> dict:
 
     # Abschnitt 2.1/2.2 – H-Sätze + Piktogramme
     if "2" in sections:
-        h_matches = re.findall(r"H\d{3}", sections["2"])
+        h_matches = re.findall(r"\bH\d{3}", sections["2"])
         data["h_statements"] = sorted(set(h_matches))
 
-        ghs_matches = re.findall(r"GHS\d{2}", sections["2"])
+        ghs_matches = re.findall(r"\bGHS\d{2}", sections["2"])
         data["pictograms"] = sorted(set(ghs_matches))
 
     # Abschnitt 14 – UN-Nummern
-    if "9" in sections:
-        un_match = re.search(r"UN\d{1,4}", sections["9"], flags=re.I)
-        data["un_number"] = un_match.group(1).strip() if un_match else None
+    if "14" in sections:
+        un_match = re.search(r"(\bUN\s*\d{1,4})", sections["14"], flags=re.I)
+        data["un_number"] = un_match.group(1).strip().replace(" ", "") if un_match else None
 
-    print(data)
+
     return data

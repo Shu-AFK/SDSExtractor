@@ -25,8 +25,6 @@ def open_and_write_excel(filepath: str, row_data: list, sheet_name="Gefahrstoffk
     ws.append(row_data)
     wb.save(filepath)
 
-    print("Excel datei wurde geschrieben: {}".format(filepath))
-
 def convert_data_to_list(data: dict) -> list:
     """
     Converts the SDS data to a list for writing to Excel.

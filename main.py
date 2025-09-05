@@ -10,14 +10,16 @@ def main():
         help="Run in command-line mode instead of starting the GUI."
     )
     parser.add_argument(
-        "--path"
+        "--path",
         "-p",
+        dest="path",
         type=str,
         help="Path to the root of the pdf folder."
     )
     parser.add_argument(
-        "--excel-file"
+        "--excel-path",
         "-e",
+        dest="excel_path",
         type=str,
         help="Path to the excel file to be created."
     )
@@ -25,11 +27,11 @@ def main():
     args = parser.parse_args()
 
     if args.cli:
-        if args.path == "" or args.path is None or args.excel_file == "" or args.excel_file is None:
+        if not args.path or not args.excel_path:
             print("No path and/or excel file specified. Exiting.")
             return
 
-        run_cli(args.path, args.excel_file)
+        run_cli(args.path, args.excel_path)
     else:
         App().mainloop()
 
