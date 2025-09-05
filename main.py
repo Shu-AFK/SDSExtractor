@@ -6,6 +6,8 @@ def main():
     parser = argparse.ArgumentParser(description="Run the application in GUI or CLI mode.")
     parser.add_argument(
         "--cli",
+        "-c",
+        dest="cli",
         action="store_true",
         help="Run in command-line mode instead of starting the GUI."
     )
@@ -23,6 +25,13 @@ def main():
         type=str,
         help="Path to the excel file to be created."
     )
+    parser.add_argument(
+        "--use-fallback",
+        "-f",
+        dest="use_fallback",
+        action="store_true",
+        help="Use fallback method for extracting sds fields."
+    )
 
     args = parser.parse_args()
 
@@ -31,7 +40,7 @@ def main():
             print("No path and/or excel file specified. Exiting.")
             return
 
-        run_cli(args.path, args.excel_path)
+        run_cli(args.path, args.excel_path, args.use_fallback)
     else:
         App().mainloop()
 

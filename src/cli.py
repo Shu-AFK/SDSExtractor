@@ -97,7 +97,7 @@ def _should_write_sds(sds: dict, file_path: Path) -> bool:
     print(f"[SKIP] Not writing '{file_path}' due to missing fields (None): {', '.join(none_fields)}")
     return False
 
-def run_cli(path: str, excel_path: str):
+def run_cli(path: str, excel_path: str, use_fallback: bool):
     root = Path(path).resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError(f"Path does not exist or is not a directory: {root}")
@@ -112,20 +112,23 @@ def run_cli(path: str, excel_path: str):
                 for entry in child_path.iterdir():
                     if entry.is_file() and entry.suffix.lower() == ".pdf":
                         text = src.pdf.extract_text_chain(entry.as_posix())
-                        sds = src.pdf.parse_sds(text)
+
+                        # --- Parser auswählen ---
+                        if use_fallback:
+                            sds = src.pdf.parse_sds_fallback(text)
+                        else:
+                            sds = src.pdf.parse_sds(text)
+
                         _report_none_fields(sds, entry)
                         h_set = _extract_h_set(sds)
 
                         all_entries.append((entry.name, h_set, sds))
 
-
                 if not all_entries:
                     continue
 
-                # Compare H-Sätze across entries in this child directory
                 unique_h_sets = {frozenset(h) for _, h, _ in all_entries}
 
-                # Case 1: all files share the same H-set within this child dir
                 if len(unique_h_sets) == 1:
                     first_sds = all_entries[0][2]
                     handelsname = _build_handelsname_with_first_dir(root, child_path, child_name)
@@ -135,24 +138,19 @@ def run_cli(path: str, excel_path: str):
                         sds_excel_list = src.excel.convert_data_to_list(first_sds)
                         src.excel.open_and_write_excel(excel_path, sds_excel_list)
 
-                # Case 2: otherwise, create a new list of SDS objects (they share some H-sets)
                 else:
-                    # Build a list that only contains SDS whose H-Sätze are unique within this child directory
                     counts = {}
                     for _, h, _ in all_entries:
                         key = frozenset(h)
                         counts[key] = counts.get(key, 0) + 1
                     sds_list = [s for _, h, s in all_entries if counts[frozenset(h)] == 1]
 
-                    # Always set the handelsname for each SDS being written, even if H-Sätze are unique
                     handelsname = _build_handelsname_with_first_dir(root, child_path, child_name)
                     for sds_obj in sds_list:
                         _set_handels_name(sds_obj, handelsname)
                         if _should_write_sds(sds_obj, child_path):
                             sds_excel_list = src.excel.convert_data_to_list(sds_obj)
                             src.excel.open_and_write_excel(excel_path, sds_excel_list)
-
-
 
             except PermissionError:
                 print(f"Permission denied: {parent_name}")

@@ -76,3 +76,67 @@ def parse_sds(text: str) -> dict:
 
 
     return data
+
+def split_sections_fallback(text: str) -> dict:
+    """Split SDS into sections by 'ABSCHNITT x:' headers."""
+    sections = {}
+    matches = list(re.finditer(r"\*?\s*ABSCHNITT\s+(\d+):", text, flags=re.I))
+    for i, match in enumerate(matches):
+        sec_num = match.group(1)
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[sec_num] = text[start:end].strip()
+    return sections
+
+
+def parse_sds_fallback(text: str) -> dict:
+    """Extract key SDS info by EU norm fields."""
+    data = {
+        "handelsname": None,
+        "manufacturer": None,
+        "h_statements": [],
+        "un_number": None,
+        "pictograms": [],
+        "sds_date": None
+    }
+
+    # Datum global suchen (vor Abschnitt 1 möglich)
+    date_match = re.search(
+        r"(?:Überarbeitet am|Druckdatum|Bearbeitungsdatum|Erstelldatum|Stand|Revisionsdatum)\s*:?\s*([\d]{1,2}[.\-/][\d]{1,2}[.\-/][\d]{4})",
+        text,
+        flags=re.I
+    )
+    if date_match:
+        data["sds_date"] = date_match.group(1).strip()
+
+    sections = split_sections(text)
+
+    # Abschnitt 1
+    if "1" in sections:
+        # Handelsname / Artikelname
+        handels_match = re.search(r"(?:Handelsname|Artikelname):\s*(.*)", sections["1"], flags=re.I)
+        if handels_match:
+            data["handelsname"] = handels_match.group(1).strip()
+
+        # Hersteller / Lieferant: alles nach "Lieferant:"
+        manuf_match = re.search(r"Lieferant:\s*(.*?)\n", sections["1"], flags=re.I)
+        if manuf_match:
+            data["manufacturer"] = manuf_match.group(1).strip()
+
+    # Abschnitt 2 – H-Sätze + Piktogramme
+    if "2" in sections:
+        # H-Sätze können als "H317" oder "(H317)" vorkommen
+        h_matches = re.findall(r"\bH\d{3}\b", sections["2"])
+        data["h_statements"] = sorted(set(h_matches))
+
+        # Piktogramme GHSxx
+        ghs_matches = re.findall(r"\bGHS\d{2}\b", sections["2"])
+        data["pictograms"] = sorted(set(ghs_matches))
+
+    # Abschnitt 14 – UN-Nummer
+    if "14" in sections:
+        un_match = re.search(r"\bUN\s*\d{1,4}\b", sections["14"], flags=re.I)
+        if un_match:
+            data["un_number"] = un_match.group(0).replace(" ", "")
+
+    return data
