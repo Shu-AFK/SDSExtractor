@@ -1,6 +1,7 @@
 import re
 import pdfplumber
 
+
 def extract_text_chain(pdf_path: str) -> str:
     """Extract and normalize text from SDS PDF."""
     text_parts = []
@@ -11,7 +12,7 @@ def extract_text_chain(pdf_path: str) -> str:
 
     # Clean text
     text = re.sub(r"-\n", "", raw_text)  # fix split words
-    text = re.sub(r"\n+", "\n", text)    # collapse newlines
+    text = re.sub(r"\n+", "\n", text)  # collapse newlines
     text = re.sub(r"[ \t]+", " ", text)  # normalize spaces
     return text.strip()
 
@@ -74,8 +75,8 @@ def parse_sds(text: str) -> dict:
         un_match = re.search(r"(\bUN\s*\d{1,4})", sections["14"], flags=re.I)
         data["un_number"] = un_match.group(1).strip().replace(" ", "") if un_match else None
 
-
     return data
+
 
 def split_sections_fallback(text: str) -> dict:
     """Split SDS into sections by 'ABSCHNITT x:' headers."""
@@ -138,5 +139,152 @@ def parse_sds_fallback(text: str) -> dict:
         un_match = re.search(r"\bUN\s*\d{1,4}\b", sections["14"], flags=re.I)
         if un_match:
             data["un_number"] = un_match.group(0).replace(" ", "")
+
+    return data
+
+
+def parse_sds_3m_format(pdf_path: str) -> dict:
+    """Parse 3M/Meguiar's style SDS documents with different structure."""
+    text = extract_text_chain(pdf_path)
+
+    data = {
+        "handelsname": None,
+        "manufacturer": None,
+        "h_statements": [],
+        "un_number": None,
+        "pictograms": [],
+        "sds_date": None
+    }
+
+    # Extract date from header - look for "Überarbeitet am" pattern
+    date_match = re.search(
+        r"Überarbeitet am:\s*([\d]{1,2}[./][\d]{1,2}[./][\d]{4})",
+        text,
+        flags=re.I
+    )
+    if date_match:
+        data["sds_date"] = date_match.group(1).strip()
+
+    # Extract product name from document title (before the underscores)
+    product_match = re.search(
+        r"^([^\n_]+(?:Heavy Duty Cleaner|Remover|Cleaner)[^\n_]*)",
+        text,
+        flags=re.MULTILINE
+    )
+    if product_match:
+        data["handelsname"] = re.sub(r'\s+', ' ', product_match.group(1).strip())
+
+    # Split into sections
+    sections = {}
+    matches = list(re.finditer(r"ABSCHNITT\s+(\d+):\s*([^\n]*)", text, flags=re.I))
+
+    for i, match in enumerate(matches):
+        sec_num = match.group(1)
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        sections[sec_num] = text[start:end].strip()
+
+    # Section 1 - Product identification
+    if "1" in sections:
+        section1 = sections["1"]
+
+        # Look for manufacturer/supplier info - 3M format uses "Anschrift:"
+        manuf_match = re.search(
+            r"Anschrift:\s*([^,\n]+)",
+            section1,
+            flags=re.I
+        )
+        if manuf_match:
+            data["manufacturer"] = manuf_match.group(1).strip()
+
+    # Section 2 - Hazards
+    if "2" in sections:
+        section2 = sections["2"]
+
+        # Look for H-statements in various formats
+        h_matches = re.findall(r"\bH\d{3}\b", section2)
+        data["h_statements"] = sorted(set(h_matches))
+
+        # Look for GHS pictograms
+        ghs_matches = re.findall(r"\bGHS\d{2}\b", section2)
+        data["pictograms"] = sorted(set(ghs_matches))
+
+    # Section 14 - Transport information
+    if "14" in sections:
+        section14 = sections["14"]
+
+        # Check if it explicitly states "Kein Gefahrgut" or similar
+        if re.search(r"Kein Gefahrgut|Not dangerous for transport", section14, flags=re.I):
+            data["un_number"] = "Not classified"
+        else:
+            # Look for UN number
+            un_match = re.search(r"\bUN\s*(\d{1,4})\b", section14, flags=re.I)
+            if un_match:
+                data["un_number"] = f"UN{un_match.group(1)}"
+
+    return data
+
+def parse_sds_basf_format(pdf_path: str) -> dict:
+    """Parse BASF-style SDS (with EU 2020/878 format)."""
+    text = extract_text_chain(pdf_path)
+
+    data = {
+        "handelsname": None,
+        "manufacturer": None,
+        "h_statements": [],
+        "un_number": None,
+        "pictograms": [],
+        "sds_date": None
+    }
+
+    # Extract revision date from header
+    date_match = re.search(
+        r"Überarbeitet am:\s*([\d]{1,2}[./-][\d]{1,2}[./-][\d]{4})",
+        text,
+        flags=re.I
+    )
+    if date_match:
+        data["sds_date"] = date_match.group(1).strip()
+
+    # Split sections
+    sections = split_sections(text)
+
+    # Abschnitt 1 – Product and company identification
+    if "1" in sections:
+        section1 = sections["1"]
+
+        # Handelsname (may be multiple lines)
+        handels_match = re.search(
+            r"Handelsname\s*:?\s*(.+)", section1, flags=re.I
+        )
+        if handels_match:
+            data["handelsname"] = re.sub(r"\s+", " ", handels_match.group(1).strip())
+
+        # Manufacturer / Firma
+        manuf_match = re.search(
+            r"Firma:\s*([^\n\r]+)", section1, flags=re.I
+        )
+        if manuf_match:
+            data["manufacturer"] = manuf_match.group(1).strip()
+
+    # Abschnitt 2 – Hazards
+    if "2" in sections:
+        section2 = sections["2"]
+
+        # H-statements
+        h_matches = re.findall(r"\bH\d{3}\b", section2)
+        data["h_statements"] = sorted(set(h_matches))
+
+        # GHS pictograms (text may just say "Gefahrenpiktogramme")
+        ghs_matches = re.findall(r"\bGHS\d{2}\b", section2)
+        data["pictograms"] = sorted(set(ghs_matches))
+
+    # Abschnitt 14 – Transport
+    if "14" in sections:
+        section14 = sections["14"]
+
+        un_match = re.search(r"\bUN\s*(\d{1,4})\b", section14, flags=re.I)
+        if un_match:
+            data["un_number"] = f"UN{un_match.group(1)}"
 
     return data

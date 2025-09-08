@@ -28,12 +28,14 @@ def _extract_h_set(sds):
 
     return set()
 
+
 def _set_handels_name(sds, name: str):
     """
     Set the product trade name on the SDS object using the 'handelsname' key.
     """
     if isinstance(sds, dict):
         sds["handelsname"] = name
+
 
 def _build_handelsname_with_first_dir(root: Path, child_dir: Path, leaf_name: str) -> str:
     """
@@ -76,6 +78,7 @@ def _report_none_fields(sds: dict, file_path: Path) -> None:
     elif none_fields:
         print(f"[WARN] Some SDS fields are missing for: {file_path} -> {', '.join(none_fields)}")
 
+
 def _should_write_sds(sds: dict, file_path: Path) -> bool:
     """
     Allow writing if:
@@ -88,16 +91,16 @@ def _should_write_sds(sds: dict, file_path: Path) -> bool:
     if not none_fields:
         return True
 
-    allowed_missing = {"un_number", "handelsname"}
+    allowed_missing = {"un_number", "handelsname", "pictograms"}
     if set(none_fields).issubset(allowed_missing):
-        # Only UN number and/or handelsname missing -> still write
         return True
 
     # Otherwise, skip and notify
     print(f"[SKIP] Not writing '{file_path}' due to missing fields (None): {', '.join(none_fields)}")
     return False
 
-def run_cli(path: str, excel_path: str, use_fallback: bool):
+
+def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_basf: bool):
     root = Path(path).resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError(f"Path does not exist or is not a directory: {root}")
@@ -111,12 +114,18 @@ def run_cli(path: str, excel_path: str, use_fallback: bool):
                 all_entries = []
                 for entry in child_path.iterdir():
                     if entry.is_file() and entry.suffix.lower() == ".pdf":
-                        text = src.pdf.extract_text_chain(entry.as_posix())
-
-                        # --- Parser auswählen ---
-                        if use_fallback:
+                        if use_3mf:
+                            # Use 3M format parser - takes file path directly
+                            sds = src.pdf.parse_sds_3m_format(entry.as_posix())
+                        elif use_basf:
+                            sds = src.pdf.parse_sds_basf_format(entry.as_posix())
+                        elif use_fallback:
+                            # Use fallback parser
+                            text = src.pdf.extract_text_chain(entry.as_posix())
                             sds = src.pdf.parse_sds_fallback(text)
                         else:
+                            # Use standard parser
+                            text = src.pdf.extract_text_chain(entry.as_posix())
                             sds = src.pdf.parse_sds(text)
 
                         _report_none_fields(sds, entry)
