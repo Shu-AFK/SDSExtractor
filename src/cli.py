@@ -118,6 +118,7 @@ def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_b
                             # Use 3M format parser - takes file path directly
                             sds = src.pdf.parse_sds_3m_format(entry.as_posix())
                         elif use_basf:
+                            # Use BASF format parser - takes file path directly
                             sds = src.pdf.parse_sds_basf_format(entry.as_posix())
                         elif use_fallback:
                             # Use fallback parser

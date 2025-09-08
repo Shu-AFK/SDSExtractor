@@ -1,6 +1,17 @@
 import re
 import pdfplumber
 
+H_TO_GHS = {
+    "H200": ["GHS01"], "H201": ["GHS01"], "H202": ["GHS01"], "H203": ["GHS01"],
+    "H220": ["GHS02"], "H221": ["GHS02"], "H222": ["GHS02"], "H225": ["GHS02"], "H226": ["GHS02"],
+    "H228": ["GHS02"],
+    "H301": ["GHS06"], "H311": ["GHS06"], "H331": ["GHS06"],
+    "H302": ["GHS07"], "H312": ["GHS07"], "H315": ["GHS07"], "H319": ["GHS07"], "H335": ["GHS07"], "H336": ["GHS07"],
+    "H317": ["GHS07", "GHS08"],  # sensitizer, may overlap with health hazard
+    "H314": ["GHS05"], "H318": ["GHS05"],
+    "H350": ["GHS08"], "H360": ["GHS08"], "H370": ["GHS08"], "H372": ["GHS08"],
+    "H400": ["GHS09"], "H410": ["GHS09"], "H411": ["GHS09"], "H412": ["GHS09"]
+}
 
 def extract_text_chain(pdf_path: str) -> str:
     """Extract and normalize text from SDS PDF."""
@@ -237,12 +248,8 @@ def parse_sds_basf_format(pdf_path: str) -> dict:
         "sds_date": None
     }
 
-    # Extract revision date from header
-    date_match = re.search(
-        r"Überarbeitet am:\s*([\d]{1,2}[./-][\d]{1,2}[./-][\d]{4})",
-        text,
-        flags=re.I
-    )
+    # Extract revision date
+    date_match = re.search(r"Überarbeitet am:\s*([\d]{1,2}[./-][\d]{1,2}[./-][\d]{4})", text, flags=re.I)
     if date_match:
         data["sds_date"] = date_match.group(1).strip()
 
@@ -253,17 +260,11 @@ def parse_sds_basf_format(pdf_path: str) -> dict:
     if "1" in sections:
         section1 = sections["1"]
 
-        # Handelsname (may be multiple lines)
-        handels_match = re.search(
-            r"Handelsname\s*:?\s*(.+)", section1, flags=re.I
-        )
+        handels_match = re.search(r"Handelsname\s*:?\s*(.+)", section1, flags=re.I)
         if handels_match:
             data["handelsname"] = re.sub(r"\s+", " ", handels_match.group(1).strip())
 
-        # Manufacturer / Firma
-        manuf_match = re.search(
-            r"Firma:\s*([^\n\r]+)", section1, flags=re.I
-        )
+        manuf_match = re.search(r"Firma:\s*([^\n\r]+)", section1, flags=re.I)
         if manuf_match:
             data["manufacturer"] = manuf_match.group(1).strip()
 
@@ -275,14 +276,20 @@ def parse_sds_basf_format(pdf_path: str) -> dict:
         h_matches = re.findall(r"\bH\d{3}\b", section2)
         data["h_statements"] = sorted(set(h_matches))
 
-        # GHS pictograms (text may just say "Gefahrenpiktogramme")
+        # Try to find explicit pictograms first
         ghs_matches = re.findall(r"\bGHS\d{2}\b", section2)
-        data["pictograms"] = sorted(set(ghs_matches))
+        if ghs_matches:
+            data["pictograms"] = sorted(set(ghs_matches))
+        else:
+            # Derive pictograms from H-statements
+            pictos = []
+            for h in data["h_statements"]:
+                pictos.extend(H_TO_GHS.get(h, []))
+            data["pictograms"] = sorted(set(pictos))
 
     # Abschnitt 14 – Transport
     if "14" in sections:
         section14 = sections["14"]
-
         un_match = re.search(r"\bUN\s*(\d{1,4})\b", section14, flags=re.I)
         if un_match:
             data["un_number"] = f"UN{un_match.group(1)}"
