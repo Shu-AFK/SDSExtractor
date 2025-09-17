@@ -1,20 +1,23 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 import base64
 from io import BytesIO
 from PIL import Image, ImageTk
+from typing import cast
+from tkinter import PhotoImage as TkPhotoImage
 
-from src.pdf import extract_text_chain, parse_sds
+import src.pdf
 from src.excel import open_and_write_excel
 import src.image
 
 
 class RowWidget:
-    def __init__(self, parent, row_index, all_rows):
+    def __init__(self, parent, row_index, all_rows, app_ref):
         self.parent = parent
         self.row_index = row_index
         self.all_rows = all_rows
+        self.app_ref = app_ref  # <-- reference to App, to access parse mode
 
         self.data = {
             "handelsname": "",
@@ -41,6 +44,24 @@ class RowWidget:
     def grid(self, **kwargs):
         self.frame.grid(**kwargs)
 
+    def _parse_pdf(self, pdf_path: str) -> dict:
+        """Parse according to selected GUI dropdown mode."""
+        mode = self.app_ref.parse_mode_var.get()
+        if mode == "3M":
+            return src.pdf.parse_sds_3m_format(pdf_path)
+        elif mode == "BASF":
+            return src.pdf.parse_sds_basf_format(pdf_path)
+        elif mode == "Lechler":
+            sds = src.pdf.parse_sds_lechler_format(pdf_path)
+            sds["manufacturer"] = "Lechler Coatings GmbH"
+            return sds
+        elif mode == "Fallback":
+            text = src.pdf.extract_text_chain(pdf_path)
+            return src.pdf.parse_sds_fallback(text)
+        else:  # Default
+            text = src.pdf.extract_text_chain(pdf_path)
+            return src.pdf.parse_sds(text)
+
     def load_pdfs(self):
         file_paths = filedialog.askopenfilenames(
             title="Sicherheitsdatenblatt PDF(s) auswählen",
@@ -52,13 +73,12 @@ class RowWidget:
         parsed_list = []
         for pdf_path in file_paths:
             try:
-                text = extract_text_chain(pdf_path)
-                parsed = parse_sds(text)
+                parsed = self._parse_pdf(pdf_path)
                 parsed_list.append(parsed)
             except Exception as e:
                 messagebox.showerror("Fehler beim Lesen", f"Fehler beim Verarbeiten von:\n{pdf_path}\n\n{e}")
 
-        # Gruppieren nach einzigartiger Kombination von H-Sätzen + Piktogrammen
+        # Gruppieren nach H-Sätzen + Piktogrammen
         unique_groups = {}
         for parsed in parsed_list:
             key = (tuple(sorted(parsed.get("h_statements", []))),
@@ -85,49 +105,50 @@ class RowWidget:
         self.handelsname_entry.config(state="normal")
         self.handelsname_entry.focus_set()
 
-        # Weitere Zeilen hinzufügen, wenn es unterschiedliche Gruppen gibt
+        # Weitere Zeilen hinzufügen
         for data in rows_to_create:
-            new_row = RowWidget(self.parent, len(self.all_rows), self.all_rows)
+            new_row = RowWidget(self.parent, len(self.all_rows), self.all_rows, self.app_ref)
             new_row.data.update(data)
             new_row.handelsname_var.set(data["handelsname"])
             new_row.handelsname_entry.config(state="normal")
             new_row.grid(row=len(self.all_rows), column=0, sticky="we", pady=3)
             self.all_rows.append(new_row)
 
-    def get_row_for_excel(self):
-        self.data["handelsname"] = self.handelsname_var.get().strip()
-        return [
-            self.data["handelsname"],
-            self.data["manufacturer"] or "",
-            ", ".join(self.data["un_number"]) or "",
-            "; ".join(self.data["h_statements"]) or "",
-            ", ".join(self.data["pictograms"]) or "",
-            "",  # Lagerort
-            "",  # Menge im Lager
-            "",  # Besonderheiten
-            self.data["sds_date"] or "",
-        ]
-
 
 class App(tk.Tk):
-    def __init__(self):
+    def __init__(self, path=None, excel_path=None, insert_row=None):
         super().__init__()
         self.title("SDS → Excel")
-        self.geometry("800x420")
+        self.geometry("820x460")
 
-        icon_data = base64.b64decode(src.image.icon_base64)
-        img = Image.open(BytesIO(icon_data))
-        icon = ImageTk.PhotoImage(img)
+        self.insert_row = insert_row
+        self.excel_path_var = tk.StringVar(value=excel_path or "")
 
-        self.iconphoto(False, icon)
+        # parse mode dropdown
+        self.parse_mode_var = tk.StringVar(value="Default")  # Default, Fallback, 3M, BASF, Lechler
 
+        try:
+            self.icon = tk.PhotoImage(data=src.image.icon_base64)
+            self.iconphoto(False, self.icon)
+            self._icon_ref = self.icon
+
+        except tk.TclError as e:
+            print("Could not set icon:", e)
+
+        # --- UI setup ---
         top = tk.Frame(self, padx=10, pady=10)
         top.pack(fill="x")
+
         tk.Label(top, text="Excel-Datei:").pack(side="left")
-        self.excel_path_var = tk.StringVar()
         self.excel_entry = tk.Entry(top, textvariable=self.excel_path_var)
         self.excel_entry.pack(side="left", expand=True, fill="x", padx=6)
         tk.Button(top, text="Durchsuchen...", command=self.choose_excel).pack(side="left")
+
+        # dropdown for parse mode
+        tk.Label(top, text="Parser:").pack(side="left", padx=(10, 4))
+        modes = ["Default", "Fallback", "3M", "BASF", "Lechler"]
+        self.mode_dropdown = ttk.Combobox(top, textvariable=self.parse_mode_var, values=modes, state="readonly", width=10)
+        self.mode_dropdown.pack(side="left")
 
         mid = tk.Frame(self, padx=10, pady=4)
         mid.pack(fill="both", expand=True)
@@ -155,7 +176,7 @@ class App(tk.Tk):
             self.excel_path_var.set(path)
 
     def add_row(self):
-        row = RowWidget(self.rows_container.content, len(self.rows), self.rows)
+        row = RowWidget(self.rows_container.content, len(self.rows), self.rows, self)
         row.grid(row=len(self.rows), column=0, sticky="we", pady=3)
         self.rows_container.content.grid_columnconfigure(0, weight=1)
         self.rows.append(row)
@@ -183,10 +204,9 @@ class App(tk.Tk):
         try:
             Path(excel_path).parent.mkdir(parents=True, exist_ok=True)
             for row_data in to_write:
-                open_and_write_excel(excel_path, row_data)
+                open_and_write_excel(excel_path, row_data, insert_row=self.insert_row)
 
             messagebox.showinfo("Erfolg", f"{len(to_write)} Zeile(n) wurden in die Excel-Datei geschrieben.")
-
             for row in self.rows:
                 row.frame.destroy()
             self.rows.clear()
