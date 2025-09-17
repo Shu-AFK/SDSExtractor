@@ -5,17 +5,13 @@ import re
 import src.pdf
 import src.excel
 
+
 def _extract_h_set(sds):
-    """
-    Extract H-Sätze as a set from the parsed SDS object.
-    If h_statements is an empty list (or empty iterable), return an empty set.
-    """
     if not isinstance(sds, dict):
         return set()
 
     values = sds.get("h_statements", [])
 
-    # If it's explicitly an empty list (or any empty iterable), exclude by returning an empty set
     if isinstance(values, (list, set, tuple)) and not values:
         return set()
 
@@ -30,20 +26,11 @@ def _extract_h_set(sds):
 
 
 def _set_handels_name(sds, name: str):
-    """
-    Set the product trade name on the SDS object using the 'handelsname' key.
-    """
     if isinstance(sds, dict):
         sds["handelsname"] = name
 
 
 def _build_handelsname_with_first_dir(root: Path, child_dir: Path, leaf_name: str) -> str:
-    """
-    Build '{firstname} {sub} {leaf}' where:
-      - firstname: the first directory under root (e.g., 'Auto-K')
-      - sub: the immediate parent of 'leaf' under that first directory (if present)
-      - leaf: the provided leaf_name (e.g., current child dir)
-    """
     rel_parts = child_dir.relative_to(root).parts
     firstname = rel_parts[0] if rel_parts else leaf_name
     sub = rel_parts[-2] if len(rel_parts) >= 2 else ""
@@ -58,18 +45,10 @@ def _build_handelsname_with_first_dir(root: Path, child_dir: Path, leaf_name: st
 def is_missing(key, val):
     if key in ("h_statements", "pictograms"):
         return val is None or (isinstance(val, (list, tuple, set)) and len(val) == 0)
-        # string-like fields
     return val is None or (isinstance(val, str) and val.strip() == "")
 
 
 def _report_none_fields(sds: dict, file_path: Path) -> None:
-    """
-    Print a warning if some or all expected fields in the SDS are missing.
-    Missing means:
-      - None
-      - empty string (after strip)
-      - empty iterable for list-like fields
-    """
     expected_keys = ["handelsname", "manufacturer", "h_statements", "un_number", "pictograms", "sds_date"]
     none_fields = [k for k in expected_keys if is_missing(k, sds.get(k))]
 
@@ -80,27 +59,33 @@ def _report_none_fields(sds: dict, file_path: Path) -> None:
 
 
 def _should_write_sds(sds: dict, file_path: Path) -> bool:
-    """
-    Allow writing if:
-      - all required fields are present, OR
-      - the only missing (None) fields are 'un_number' and/or 'handelsname'.
-    """
     expected_keys = ["handelsname", "manufacturer", "h_statements", "un_number", "pictograms", "sds_date"]
     none_fields = [k for k in expected_keys if is_missing(k, sds.get(k))]
 
     if not none_fields:
         return True
 
-    allowed_missing = {"un_number", "handelsname", "pictograms"}
+    allowed_missing = {"un_number", "handelsname", "pictograms", "sds_date"}
     if set(none_fields).issubset(allowed_missing):
         return True
 
-    # Otherwise, skip and notify
     print(f"[SKIP] Not writing '{file_path}' due to missing fields (None): {', '.join(none_fields)}")
     return False
 
 
-def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_basf: bool):
+def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_basf: bool, use_lechler: bool,
+            insert_row: int | None = None):
+    """
+    Main CLI runner. Walks directories, parses SDS PDFs, and writes them into Excel.
+
+    Args:
+        path: Root folder with PDFs
+        excel_path: Path to Excel file
+        use_fallback: Use fallback parser
+        use_3mf: Use 3M parser
+        use_basf: Use BASF parser
+        insert_row: If given, insert into this row instead of appending
+    """
     root = Path(path).resolve()
     if not root.exists() or not root.is_dir():
         raise ValueError(f"Path does not exist or is not a directory: {root}")
@@ -115,23 +100,21 @@ def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_b
                 for entry in child_path.iterdir():
                     if entry.is_file() and entry.suffix.lower() == ".pdf":
                         if use_3mf:
-                            # Use 3M format parser - takes file path directly
                             sds = src.pdf.parse_sds_3m_format(entry.as_posix())
                         elif use_basf:
-                            # Use BASF format parser - takes file path directly
                             sds = src.pdf.parse_sds_basf_format(entry.as_posix())
+                        elif use_lechler:
+                            sds = src.pdf.parse_sds_lechler_format(entry.as_posix())
+                            sds["manufacturer"] = "Lechler Coatings GmbH"
                         elif use_fallback:
-                            # Use fallback parser
                             text = src.pdf.extract_text_chain(entry.as_posix())
                             sds = src.pdf.parse_sds_fallback(text)
                         else:
-                            # Use standard parser
                             text = src.pdf.extract_text_chain(entry.as_posix())
                             sds = src.pdf.parse_sds(text)
 
                         _report_none_fields(sds, entry)
                         h_set = _extract_h_set(sds)
-
                         all_entries.append((entry.name, h_set, sds))
 
                 if not all_entries:
@@ -146,7 +129,9 @@ def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_b
 
                     if _should_write_sds(first_sds, child_path):
                         sds_excel_list = src.excel.convert_data_to_list(first_sds)
-                        src.excel.open_and_write_excel(excel_path, sds_excel_list)
+                        src.excel.open_and_write_excel(
+                            excel_path, sds_excel_list, insert_row=insert_row
+                        )
 
                 else:
                     counts = {}
@@ -160,7 +145,9 @@ def run_cli(path: str, excel_path: str, use_fallback: bool, use_3mf: bool, use_b
                         _set_handels_name(sds_obj, handelsname)
                         if _should_write_sds(sds_obj, child_path):
                             sds_excel_list = src.excel.convert_data_to_list(sds_obj)
-                            src.excel.open_and_write_excel(excel_path, sds_excel_list)
+                            src.excel.open_and_write_excel(
+                                excel_path, sds_excel_list, insert_row=insert_row
+                            )
 
             except PermissionError:
                 print(f"Permission denied: {parent_name}")

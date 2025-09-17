@@ -26,6 +26,13 @@ def main():
         help="Path to the excel file to be created."
     )
     parser.add_argument(
+        "--insert-row",
+        "-r",
+        dest="insert_row",
+        type=int,
+        help="Row number in the Excel file where data should be inserted (1-based index)."
+    )
+    parser.add_argument(
         "--use-fallback",
         "-f",
         dest="use_fallback",
@@ -37,20 +44,28 @@ def main():
         "-3",
         dest="use_3mf",
         action="store_true",
-        help="Use 3MF method for extracting sds fields."
+        help="Use 3M method for extracting sds fields."
     )
     parser.add_argument(
-        "--use-basf"
+        "--use-basf",
         "-b",
         dest="use_basf",
         action="store_true",
         help="Use BASF method for extracting sds fields."
+    )
+    parser.add_argument(
+        "--use-lechler",
+        dest="use_lechler",
+        action="store_true",
+        help="Use Lechler method for extracting sds fields."
     )
 
     parser.set_defaults(cli=False)
     parser.set_defaults(use_fallback=False)
     parser.set_defaults(use_3mf=False)
     parser.set_defaults(use_basf=False)
+    parser.set_defaults(use_lechler=False)
+    parser.set_defaults(insert_row=None)
 
     args = parser.parse_args()
 
@@ -59,7 +74,15 @@ def main():
             print("No path and/or excel file specified. Exiting.")
             return
 
-        run_cli(args.path, args.excel_path, args.use_fallback, args.use_3mf, args.use_basf)
+        run_cli(
+            args.path,
+            args.excel_path,
+            args.use_fallback,
+            args.use_3mf,
+            args.use_basf,
+            args.use_lechler,
+            insert_row=args.insert_row,
+        )
     else:
         App().mainloop()
 

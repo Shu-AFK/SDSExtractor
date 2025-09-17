@@ -1,5 +1,6 @@
 import re
 import pdfplumber
+from datetime import datetime
 
 H_TO_GHS = {
     "H200": ["GHS01"], "H201": ["GHS01"], "H202": ["GHS01"], "H203": ["GHS01"],
@@ -7,7 +8,7 @@ H_TO_GHS = {
     "H228": ["GHS02"],
     "H301": ["GHS06"], "H311": ["GHS06"], "H331": ["GHS06"],
     "H302": ["GHS07"], "H312": ["GHS07"], "H315": ["GHS07"], "H319": ["GHS07"], "H335": ["GHS07"], "H336": ["GHS07"],
-    "H317": ["GHS07", "GHS08"],  # sensitizer, may overlap with health hazard
+    "H317": ["GHS07", "GHS08"],
     "H314": ["GHS05"], "H318": ["GHS05"],
     "H350": ["GHS08"], "H360": ["GHS08"], "H370": ["GHS08"], "H372": ["GHS08"],
     "H400": ["GHS09"], "H410": ["GHS09"], "H411": ["GHS09"], "H412": ["GHS09"]
@@ -137,11 +138,23 @@ def parse_sds_fallback(text: str) -> dict:
 
     # Abschnitt 2 – H-Sätze + Piktogramme
     if "2" in sections:
-        # H-Sätze können als "H317" oder "(H317)" vorkommen
-        h_matches = re.findall(r"\bH\d{3}\b", sections["2"])
-        data["h_statements"] = sorted(set(h_matches))
+        section2_text = sections["2"]
 
-        # Piktogramme GHSxx
+        h_patterns = [
+            r"\bH(\d{3})\b",
+            r"H(\d{3})\s+[A-ZÜÖÄ]",
+            r"Flam\.\s*Liq\.\s*\d+[,\s]+H(\d{3})",
+            r"STOT\s*SE\s*\d+[,\s]+H(\d{3})",
+        ]
+
+        h_statements = set()
+        for pattern in h_patterns:
+            matches = re.findall(pattern, section2_text, flags=re.I)
+            for match in matches:
+                h_statements.add(f"H{match}")
+
+        data["h_statements"] = sorted(list(h_statements))
+
         ghs_matches = re.findall(r"\bGHS\d{2}\b", sections["2"])
         data["pictograms"] = sorted(set(ghs_matches))
 
@@ -249,7 +262,11 @@ def parse_sds_basf_format(pdf_path: str) -> dict:
     }
 
     # Extract revision date
-    date_match = re.search(r"Überarbeitet am:\s*([\d]{1,2}[./-][\d]{1,2}[./-][\d]{4})", text, flags=re.I)
+    date_match = re.search(
+        r"(?:Datum der letzten Ausgabe|Überarbeitet am)\s*:?\s*([\d]{1,2}[./-][\d]{1,2}[./-][\d]{4})",
+        text,
+        flags=re.I
+    )
     if date_match:
         data["sds_date"] = date_match.group(1).strip()
 
@@ -293,5 +310,165 @@ def parse_sds_basf_format(pdf_path: str) -> dict:
         un_match = re.search(r"\bUN\s*(\d{1,4})\b", section14, flags=re.I)
         if un_match:
             data["un_number"] = f"UN{un_match.group(1)}"
+
+    return data
+
+def parse_sds_lechler_format(pdf_path: str) -> dict:
+    try:
+        text = extract_text_chain(pdf_path)
+    except Exception as e:
+        print(f"Error extracting text from {pdf_path}: {e}")
+        try:
+            import pdfplumber
+            text_parts = []
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text() or ""
+                    text_parts.append(page_text)
+            text = "\n".join(text_parts)
+            text = re.sub(r"-\n", "", text)
+            text = re.sub(r"\n+", "\n", text)
+            text = re.sub(r"[ \t]+", " ", text)
+            text = text.strip()
+        except Exception as e2:
+            print(f"Fallback extraction also failed: {e2}")
+            return {
+                "handelsname": None,
+                "manufacturer": None,
+                "h_statements": [],
+                "un_number": None,
+                "pictograms": [],
+                "sds_date": None
+            }
+
+    data = {
+        "handelsname": None,
+        "manufacturer": None,
+        "h_statements": [],
+        "un_number": None,
+        "pictograms": [],
+        "sds_date": None
+    }
+
+    date_patterns = [
+        r"Sicherheitsdatenblatt vom\s*([\d]{1,2}[./\-][\d]{1,2}[./\-][\d]{4})",
+        r"Version\s+\d+.*?([\d]{1,2}[./\-][\d]{1,2}[./\-][\d]{4})",
+        r"Überarbeitet am\s*:?\s*([\d]{1,2}[./\-][\d]{1,2}[./\-][\d]{4})",
+        r"Druckdatum\s*:?\s*([\d]{1,2}[./\-][\d]{1,2}[./\-][\d]{4})",
+        r"\b([\d]{1,2}/[\d]{1,2}/[\d]{4})\b"
+    ]
+
+    for pattern in date_patterns:
+        date_match = re.search(pattern, text, flags=re.I)
+        if date_match:
+            raw_date = date_match.group(1).strip()
+            try:
+                if "/" in raw_date:
+                    parsed = datetime.strptime(raw_date, "%d/%m/%Y")
+                elif "." in raw_date:
+                    parsed = datetime.strptime(raw_date, "%d.%m.%Y")
+                elif "-" in raw_date:
+                    parsed = datetime.strptime(raw_date, "%d-%m-%Y")
+                else:
+                    parsed = None
+                if parsed:
+                    data["sds_date"] = parsed.strftime("%d.%m.%Y")
+                else:
+                    data["sds_date"] = raw_date
+            except Exception:
+                data["sds_date"] = raw_date
+            break
+
+    handels_patterns = [
+        r"Handelsname:\s*([^\n\r]+)",
+        r"Produktidentifikator[^:]*:\s*[^:]*Handelsname:\s*([^\n\r]+)",
+        r"Kennzeichnung der Mischung:\s*Handelsname:\s*([^\n\r]+)",
+        r"^([A-Z][A-Z0-9\s\.\-_]{10,50})$"
+    ]
+
+    for pattern in handels_patterns:
+        handels_match = re.search(pattern, text, flags=re.I | re.MULTILINE)
+        if handels_match:
+            candidate = handels_match.group(1).strip()
+            if not re.match(r"(ABSCHNITT|Section|Version|Seite|Page)", candidate, re.I):
+                data["handelsname"] = candidate
+                break
+
+    manufacturer_patterns = [
+        r"Lieferant:\s*([^\n\r]+(?:\s+[^\n\r]+)*?)(?=\s*(?:Telefon|First Email|AUSTRIA|BELGIUM|\d+\.\d+))",
+        r"Hersteller:\s*([^\n\r]+)",
+        r"Firma:\s*([^\n\r]+)",
+        r"(Lechler\s+SpA[^\n\r]*)",
+        r"Anschrift:\s*([^\n\r]+)"
+    ]
+
+    for pattern in manufacturer_patterns:
+        manuf_match = re.search(pattern, text, flags=re.I)
+        if manuf_match:
+            manufacturer_text = manuf_match.group(1).strip()
+            manufacturer_text = re.sub(r'\s+', ' ', manufacturer_text)
+            data["manufacturer"] = manufacturer_text
+            break
+
+    sections = split_sections(text)
+
+    h_statements = set()
+    section2_text = sections["2"] if "2" in sections else text
+
+    h_patterns = [
+        r"\bH(\d{3})\b",
+        r"Gefahrenhinweise.*?H(\d{3})",
+        r"Flam\.\s*Liq\.\s*\d+.*?H(\d{3})",
+        r"STOT\s*SE\s*\d+.*?H(\d{3})",
+        r"Eye\s*Irrit\.\s*\d+.*?H(\d{3})",
+        r"Skin\s*Irrit\.\s*\d+.*?H(\d{3})"
+    ]
+
+    for pattern in h_patterns:
+        matches = re.findall(pattern, section2_text, flags=re.I | re.DOTALL)
+        for h in matches:
+            h_statements.add(f"H{h}")
+
+    einstufung_text = re.search(r"Einstufung.*?(?=ABSCHNITT|\Z)", text, flags=re.I | re.DOTALL)
+    if einstufung_text:
+        h_matches = re.findall(r"\bH(\d{3})\b", einstufung_text.group(0))
+        for h in h_matches:
+            h_statements.add(f"H{h}")
+
+    data["h_statements"] = sorted(list(h_statements))
+
+    ghs_matches = re.findall(r"\bGHS(\d{2})\b", text)
+    if ghs_matches:
+        data["pictograms"] = sorted([f"GHS{g}" for g in set(ghs_matches)])
+    else:
+        pictos = []
+        for h in data["h_statements"]:
+            pictos.extend(H_TO_GHS.get(h, []))
+        data["pictograms"] = sorted(set(pictos))
+
+    def find_un_global(text):
+        m = re.search(r'\bUN[-\s]*[:\-]?\s*([0-9]{3,4})\b', text, flags=re.I)
+        if m:
+            return "UN" + m.group(1).zfill(4)
+        m = re.search(r'UN[-\s]?Nummer(?: oder ID-Nummer)?[^\d\n]{0,60}([0-9]{3,4})', text, flags=re.I)
+        if m:
+            return "UN" + m.group(1).zfill(4)
+        for m in re.finditer(r'(?m)^[ \t]*14\s*\.?\s*1\b', text):
+            start = m.start()
+            snippet = text[start:start+400]
+            mnum2 = re.search(r'[\r\n]+\s*([0-9]{3,4})', snippet)
+            if mnum2:
+                return "UN" + mnum2.group(1).zfill(4)
+            mnum = re.search(r'\b([0-9]{3,4})\b', snippet)
+            if mnum and mnum.group(1) not in ("14","141","1415","2415"):
+                return "UN" + mnum.group(1).zfill(4)
+        m = re.search(r'ABSCHNITT\s*14\b', text, flags=re.I)
+        if m:
+            snippet = text[m.start(): m.start()+2000]
+            mnum = re.search(r'\b([0-9]{3,4})\b', snippet)
+            if mnum:
+                return "UN" + mnum.group(1).zfill(4)
+        return None
+    data["un_number"] = find_un_global(text)
 
     return data
